@@ -1,0 +1,101 @@
+import yaml
+import os
+import os.path
+from glob import glob
+
+conda: "envs/mapping.yaml"
+configfile: "config/config.yaml"
+
+rule profile:
+	input:
+		hmm = expand("profile/{name}.hmm", name = config["name"])
+
+rule domain:
+	input:
+		tsv = expand("domain/{name}.tsv", name = config["name"])
+
+rule filter:
+	input:
+		fasta = expand("input/{name}/references.fasta", name = config["name"]),
+		outliers = expand("input/{name}/outliers.txt", name = config["name"])
+	output:
+		filtered = expand("profile/analysis/{name}/filtered.fasta", name = config["name"])
+	shell:
+		"seqkit grep -vf {input.outliers} {input.fasta} -o {output}"
+
+rule cluster:
+	input:
+		filtered = expand("profile/analysis/{name}/filtered.fasta", name = config["name"])
+	output:
+		cdhit = expand("profile/analysis/{name}/filtered.cdhit", name = config["name"])
+	shell:
+		"cdhit -i {input} -o {output} -d 0 -c 0.6 -n 2"
+
+rule align:
+	input:
+		cdhit = expand("profile/analysis/{name}/filtered.cdhit", name = config["name"])
+	output:
+		mafft = expand("profile/analysis/{name}/aligned.mafft", name = config["name"])
+	threads:
+		workflow.cores
+	shell:
+		"mafft --thread {threads} --localpair --maxiterate 1000 --reorder {input} > {output}"
+
+rule annotate_aln:
+	input:
+		mafft = expand("profile/analysis/{name}/aligned.mafft", name = config["name"])
+	output:
+		a2m = expand("profile/analysis/{name}/aligned.a2m", name = config["name"])
+	shell:
+		"hhconsensus -i {input} -o stdout -M 50 | addss.pl stdin stdout | reformat.pl a3m a2m /dev/stdin {output}"
+
+rule convert_aln:
+	input:
+		a2m = expand("profile/analysis/{name}/aligned.a2m", name = config["name"])
+	output:
+		fas = expand("profile/analysis/{name}/aligned.fas", name = config["name"])
+	shell:
+		"seqkit fx2tab {input} | tail -n+4 | seqkit tab2fx | seqkit replace -sp \\\\. -r - -o {output}"
+
+rule score_aln:
+	input:
+		fas = expand("profile/analysis/{name}/aligned.fas", name = config["name"])
+	output:
+		sgc = expand("profile/analysis/{name}/aligned.sgc", name = config["name"])
+	shell:
+		"trimal -in {input} -sgc > {output}"
+
+rule trim_aln:
+	input:
+		a2m = expand("profile/analysis/{name}/aligned.a2m", name = config["name"]),
+		sgc = expand("profile/analysis/{name}/aligned.sgc", name = config["name"])
+	output:
+		trimmed = expand("profile/analysis/{name}/trimmed.a2m", name = config["name"])
+	script:
+		"scripts/trim.py"
+
+rule build_hmm:
+	input:
+		trimmed = expand("profile/analysis/{name}/trimmed.a2m", name = config["name"])
+	output:
+		hmm = expand("profile/{name}.hmm", name = config["name"])
+	shell:
+		"hmmbuild -n {config[name]} {output} {input}"
+
+rule hmmsearch:
+	input:
+		fasta = "database/sequences.fasta",
+		hmm = expand("profile/{name}.hmm", name = config["name"])
+	output:
+		matches = expand("domain/{name}.txt", name = config["name"])
+	shell:
+		"hmmsearch -o /dev/null --domtblout {output} --max {input.hmm} {input.fasta}"
+
+rule extract_domains:
+	input:
+		fasta = "database/sequences.fasta",
+		matches = expand("domain/{name}.txt", name = config["name"])
+	output:
+		expand("domain/{name}.tsv", name = config["name"])
+	script:
+		"scripts/extract.py"
