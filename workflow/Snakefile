@@ -89,12 +89,13 @@ rule hmmsearch:
 	output:
 		matches = expand("domain/{name}.txt", name = config["name"])
 	shell:
-		"hmmsearch -o /dev/null --domtblout {output} --max {input.hmm} {input.fasta}"
+		"hmmsearch -o {output} --max {input.hmm} {input.fasta}"
 
 rule extract_domains:
 	input:
 		fasta = "database/sequences.fasta",
-		matches = expand("domain/{name}.txt", name = config["name"])
+		matches = expand("domain/{name}.txt", name = config["name"]),
+		hmm = expand("profile/{name}.hmm", name = config["name"])
 	output:
 		expand("domain/{name}.tsv", name = config["name"])
 	script:
