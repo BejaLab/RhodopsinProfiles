@@ -3,8 +3,7 @@ import os
 import os.path
 from glob import glob
 
-conda: "envs/mapping.yaml"
-configfile: "config/config.yaml"
+conda: "envs/conda.yaml"
 
 rule profile:
 	input:
@@ -12,9 +11,10 @@ rule profile:
 
 rule domain:
 	input:
-		tsv = expand("domain/{name}.tsv", name = config["name"])
+		tsv = expand("{fasta}_{name}.tsv", fasta = config["sequences"], name = config["name"]),
+		faa = expand("{fasta}_{name}.faa", fasta = config["sequences"], name = config["name"])
 
-rule filter:
+rule prefilter:
 	input:
 		fasta = expand("input/{name}/references.fasta", name = config["name"]),
 		outliers = expand("input/{name}/outliers.txt", name = config["name"])
@@ -84,19 +84,20 @@ rule build_hmm:
 
 rule hmmsearch:
 	input:
-		fasta = "database/sequences.fasta",
+		fasta = config["sequences"],
 		hmm = expand("profile/{name}.hmm", name = config["name"])
 	output:
-		matches = expand("domain/{name}.txt", name = config["name"])
+		matches = expand("{fasta}_{name}.txt", fasta = config["sequences"], name = config["name"])
 	shell:
 		"hmmsearch -o {output} --max {input.hmm} {input.fasta}"
 
 rule extract_domains:
 	input:
-		fasta = "database/sequences.fasta",
-		matches = expand("domain/{name}.txt", name = config["name"]),
+		fasta = config["sequences"],
+		matches = expand("{fasta}_{name}.txt", fasta = config["sequences"], name = config["name"]),
 		hmm = expand("profile/{name}.hmm", name = config["name"])
 	output:
-		expand("domain/{name}.tsv", name = config["name"])
+		tsv = expand("{fasta}_{name}.tsv", fasta = config["sequences"], name = config["name"]),
+		faa = expand("{fasta}_{name}.faa", fasta = config["sequences"], name = config["name"])
 	script:
 		"scripts/extract.py"

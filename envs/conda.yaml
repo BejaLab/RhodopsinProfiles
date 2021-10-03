@@ -1,0 +1,10 @@
+name: rhodopsin_profiles
+dependencies:
+  - snakemake
+  - seqkit
+  - cdhit
+  - mafft
+  - hhsuite
+  - trimal
+  - hmmer=3
+  - biopython
