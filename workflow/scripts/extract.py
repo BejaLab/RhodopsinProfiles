@@ -7,7 +7,7 @@ import re
 
 fas_file = str(snakemake.input['fasta'])
 dom_file = str(snakemake.input['matches'])
-hmm_file = str(snakemake.input['hmm'])
+a2m_file = str(snakemake.input['a2m'])
 tsv_file = str(snakemake.output['tsv'])
 faa_file = str(snakemake.output['faa'])
 
@@ -16,6 +16,9 @@ offset_c        = snakemake.config['offset_c']
 extra_threshold = snakemake.config['extra_threshold']
 extra_offset    = snakemake.config['extra_offset']
 c_Evalue_threshold = snakemake.config['c_Evalue_threshold']
+hits_only = snakemake.config['hits_only'] if 'hits_only' in snakemake.config else False
+
+positions = snakemake.params['positions']
 
 domains = {}
 
@@ -133,18 +136,18 @@ def parse_aln_block(fh):
     return(vals)
 
 # parse the hmm file to extract the Lys position
-lys_pos = None
-with open(hmm_file) as hmm:
-    compo_block = False
-    for line in hmm:
-        line = line.strip()
-        fields = re.split(' +', line)
-        compo_block = compo_block or line.startswith('COMPO')
-        if compo_block and len(fields) > 22:
-            cons_res = fields[22]
-            if cons_res == 'K':
-                lys_pos = int(fields[0])
-assert lys_pos is not None, "No conserved lysine position identified in the hmm file"
+hmm_positions = []
+with open(a2m_file) as fh:
+    a2m = SeqIO.parse(fh, 'fasta')
+    record = next(a2m)
+    br_pos = 0
+    hmm_pos = 0
+    for res in record.seq:
+        is_gap = res == '-'
+        br_pos += not is_gap
+        hmm_pos += not res.islower()
+        if not is_gap and br_pos in positions:
+            hmm_positions.append(hmm_pos)
 
 # Parse the hmmsearch output
 data = {}
@@ -165,15 +168,15 @@ with open(fas_file) as fas_fh:
     with open(tsv_file, 'w') as tsv_fh:
         with open(faa_file, 'w') as faa_fh:
             tsv = csv.writer(tsv_fh, delimiter = "\t")
-            tsv.writerow([ 'record_id', 'ali_from', 'ali_left', 'hmm_from', 'hmm_left', 'full_E_value', 'full_score', 'ali_lys_pos', 'ali_lys_pos_trim', 'ali_lys_res', 'domain_seq' ])
+            tsv.writerow([ 'record_id', 'ali_from', 'ali_left', 'hmm_from', 'hmm_left', 'full_E_value', 'full_score', 'positions', 'positions_trim', 'positions_res', 'domain_seq' ])
             fas = SeqIO.parse(fas_fh, 'fasta')
             for record in fas:
                 if record.id in data:
                     ali_from = hmm_from = env_from = len(record.seq)
                     ali_to = hmm_to = env_to = 0
-                    ali_lys_pos = 0
-                    ali_lys_pos_trim = 0
-                    ali_lys_res = '-'
+                    ali_positions      =   [0] * len(positions)
+                    ali_positions_trim =   [0] * len(positions)
+                    ali_positions_res  = ['-'] * len(positions)
                     for domain in data[record.id]['domains']:
                         if domain['c_Evalue'] <= c_Evalue_threshold:
                             if domain['ali_from'] < ali_from:
@@ -184,17 +187,19 @@ with open(fas_file) as fas_fh:
                                 ali_to = domain['ali_to']
                                 hmm_to = domain['hmm_to']
                                 env_to = domain['env_to']
-                            if lys_pos >= domain['hmm_from'] and lys_pos <= domain['hmm_to']:
                                 hmm_seq = domain['hmm_seq']
                                 ali_seq = domain['ali_seq']
                                 hmm_pos = domain['hmm_from']
                                 ali_pos = domain['ali_from']
                                 for i in range(len(hmm_seq)):
-                                    if hmm_pos == lys_pos and hmm_seq[i] != '.':
-                                        ali_lys_pos = ali_pos
-                                        ali_lys_res = ali_seq[i]
-                                    hmm_pos += hmm_seq[i] != '.'
-                                    ali_pos += ali_seq[i] != '-'
+                                    hmm_res = hmm_seq[i]
+                                    ali_res = ali_seq[i]
+                                    if hmm_pos in hmm_positions and hmm_res != '.':
+                                        pos_index = hmm_positions.index(hmm_pos)
+                                        ali_positions[pos_index] = ali_pos
+                                        ali_positions_res[pos_index] = ali_res
+                                    hmm_pos += hmm_res != '.'
+                                    ali_pos += ali_res != '-'
 
                     ali_left = len(record.seq) - ali_to
                     hmm_left = hmm_len - hmm_to
@@ -209,13 +214,17 @@ with open(fas_file) as fas_fh:
                         offset_to += extra_offset
 
                     trim_from = max(ali_from - offset_from - hmm_from, 0)
-                    ali_lys_pos_trim = ali_lys_pos - trim_from if ali_lys_pos > 0 else 0
+                    for i in range(len(positions)):
+                        ali_positions_trim[i] = ali_positions[i] - trim_from if ali_positions[i] > 0 else 0
 
                     trim_to   = ali_to + offset_to + hmm_left
 
                     record.seq = record.seq[trim_from:ali_from - 1].lower() + record.seq[ali_from - 1:ali_to] + record.seq[ali_to:trim_to].lower()
-                    tsv.writerow([ record.id, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_lys_pos, ali_lys_pos_trim, ali_lys_res, record.seq ])
+                    ali_positions_str      = ','.join(map(str, ali_positions))
+                    ali_positions_trim_str = ','.join(map(str, ali_positions_trim))
+                    ali_positions_res_str  = ','.join(ali_positions_res)
+                    tsv.writerow([ record.id, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_positions_str, ali_positions_trim_str, ali_positions_res_str, record.seq ])
                     SeqIO.write(record, faa_fh, 'fasta')
-                else:
+                elif not hits_only:
                     tsv.writerow([ record.id, '', '', '', '', '', '', '', '', '', '' ])
                     stderr.write("%s: domains not found\n" % record.id)
