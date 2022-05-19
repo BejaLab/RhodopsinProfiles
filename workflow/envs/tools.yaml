@@ -1,0 +1,11 @@
+channels:
+ - bioconda
+dependencies:
+ - trimal=1.4.1
+ - hhsuite=3.3.0
+ - seqkit=0.14.0-0
+ - hmmer=3.3.2
+ - cd-hit=4.8.1
+ - mafft=7.475
+ - blast=2.11.0
+ - ffindex=0.98

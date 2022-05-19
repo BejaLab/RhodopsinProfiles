@@ -8,15 +8,16 @@ import re
 fas_file = str(snakemake.input['fasta'])
 dom_file = str(snakemake.input['matches'])
 a2m_file = str(snakemake.input['a2m'])
-tsv_file = str(snakemake.output['tsv'])
-faa_file = str(snakemake.output['faa'])
+tsv_file = str(snakemake.output)
 
-offset_n        = snakemake.config['offset_n']
-offset_c        = snakemake.config['offset_c']
-extra_threshold = snakemake.config['extra_threshold']
-extra_offset    = snakemake.config['extra_offset']
-c_Evalue_threshold = snakemake.config['c_Evalue_threshold']
-hits_only = snakemake.config['hits_only'] if 'hits_only' in snakemake.config else False
+config = snakemake.params['config']
+name            = config['name']
+offset_n        = config['offset_n']
+offset_c        = config['offset_c']
+extra_threshold = config['extra_threshold']
+extra_offset    = config['extra_offset']
+c_Evalue_threshold = config['c_Evalue_threshold']
+hits_only = config['hits_only'] if 'hits_only' in config else False
 
 positions = snakemake.params['positions']
 
@@ -168,7 +169,7 @@ with open(fas_file) as fas_fh:
     with open(tsv_file, 'w') as tsv_fh:
         with open(faa_file, 'w') as faa_fh:
             tsv = csv.writer(tsv_fh, delimiter = "\t")
-            tsv.writerow([ 'record_id', 'ali_from', 'ali_left', 'hmm_from', 'hmm_left', 'full_E_value', 'full_score', 'positions', 'positions_trim', 'positions_res', 'domain_seq' ])
+            tsv.writerow([ 'record_id', 'profile', 'ali_from', 'ali_left', 'hmm_from', 'hmm_left', 'full_E_value', 'full_score', 'positions', 'positions_trim', 'positions_res', 'domain_seq' ])
             fas = SeqIO.parse(fas_fh, 'fasta')
             for record in fas:
                 if record.id in data:
@@ -223,8 +224,7 @@ with open(fas_file) as fas_fh:
                     ali_positions_str      = ','.join(map(str, ali_positions))
                     ali_positions_trim_str = ','.join(map(str, ali_positions_trim))
                     ali_positions_res_str  = ','.join(ali_positions_res)
-                    tsv.writerow([ record.id, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_positions_str, ali_positions_trim_str, ali_positions_res_str, record.seq ])
-                    SeqIO.write(record, faa_fh, 'fasta')
+                    tsv.writerow([ record.id, name, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_positions_str, ali_positions_trim_str, ali_positions_res_str, record.seq ])
                 elif not hits_only:
-                    tsv.writerow([ record.id, '', '', '', '', '', '', '', '', '', '' ])
+                    tsv.writerow([ record.id, '', '', '', '', '', '', '', '', '', '', '' ])
                     stderr.write("%s: domains not found\n" % record.id)

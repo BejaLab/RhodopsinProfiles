@@ -1,0 +1,7 @@
+channels:
+ - conda-forge
+dependencies:
+ - r=4.1
+ - r-dplyr=1.0.9
+ - r-tidyr=1.2.0
+ - r-readxl=1.4.0

@@ -10,10 +10,10 @@ dom_file = str(snakemake.input["matches"])
 hmm_file = str(snakemake.input["hmm"])
 tsv_file = str(snakemake.output)
 
-offset          = snakemake.config["offset"]
-extra_threshold = snakemake.config["extra_threshold"]
-extra_offset    = snakemake.config["extra_offset"]
-c_Evalue_threshold = snakemake.config["c_Evalue_threshold"]
+offset          = snakemake.params["offset"]
+extra_threshold = snakemake.params["extra_threshold"]
+extra_offset    = snakemake.params["extra_offset"]
+c_Evalue_threshold = snakemake.params["c_Evalue_threshold"]
 
 domains = {}
 

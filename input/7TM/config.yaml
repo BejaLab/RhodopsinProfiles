@@ -1,5 +1,4 @@
 name               : 7TM
-sequences          : database/sequences.fasta
 offset_n           : 10
 offset_c           : 10
 extra_threshold    : 15

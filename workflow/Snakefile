@@ -4,197 +4,399 @@ import os.path
 from sys import maxsize
 from glob import glob
 
-conda: "envs/conda.yaml"
-
 rhod_lists , = glob_wildcards("refs/{list}.fasta.pdb")
 
+ref = 'BR'
+
+names ,= glob_wildcards("input/{name}/references.fasta")
+queries ,= glob_wildcards("queries/{query}.fasta")
+queries_xlsx ,= glob_wildcards("queries/{query}.xlsx")
+for query in queries_xlsx:
+    if query not in queries:
+        queries.append(query)
+
+config = {}
+
+for name in names:
+    yaml_file = "input/%s/config.yaml" % name
+    with open(yaml_file) as fd:
+        config[name] = yaml.safe_load(fd)
+
+positions = []
+pos_file = 'positions/%s.txt' % ref
+
+with open(pos_file) as fh:
+    for line in fh:
+        pos, *rest = line.split()
+        positions.append(int(pos))
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+rule default:
+    run:
+        print(f"{bcolors.FAIL}No task selected - choose one of 'profile' or 'domain'{bcolors.ENDC}\n")
+
 rule profile:
-	input:
-		hmm = expand("profile/output/{name}.hmm", name = config["name"]),
-		pos = expand("profile/output/{name}_BR.a2m", name = config["name"])
+    input:
+        expand("output/profile/{name}.hmm", name = names),
+        expand("output/profile/{name}_{ref}.a2m", name = names, ref = ref)
+
+rule uniref:
+    input:
+        expand("analysis/uniref90/{name}/hmmsearch.fasta", name = names)
 
 rule hh:
-	input:
-		hhr = expand("hh/hhblits/{name}/bfd.hhr", name = config["name"]),
-		a3m = expand("hh/hhblits/{name}/bfd.a3m", name = config["name"]),
-		hmmsearch = expand("hh/hhblits/{name}/bfd.tblout", name = config["name"]),
-		blast = expand("hh/hhblits/{name}/bfd-{list}.blast", name = config["name"], list = rhod_lists)
+    input:
+        # hhr = expand("hh/hhsearch/{name}/bfd.hhr", name = names),
+        expand("hh/hhsearch/{name}/bfd.a3m", name = names),
+        expand("hh/hhblits/{name}/bfd.hmmsearch.txt", name = names),
+        expand("hh/hhblits/{name}/bfd_{ref}.tsv", name = names, ref = ref)
+        # blast = expand("hh/hhblits/{name}/bfd-{list}.blast", name = names, list = rhod_lists)
 
 rule domain:
-	input:
-		tsv = expand("{fasta}_{name}.tsv", fasta = config["sequences"], name = config["name"]),
-		faa = expand("{fasta}_{name}.faa", fasta = config["sequences"], name = config["name"])
+    input:
+        expand("output/domains/{query}_domains.tsv", query = queries)
+
+rule collect_domains:
+    input:
+        expand("analysis/domain/{{query}}_{name}.tsv", name = names)
+    output:
+        "output/domains/{query}_domains.tsv"
+    params:
+        names = names
+    script:
+        "scripts/collect_tsv.py"
 
 rule prefilter:
-	input:
-		fasta = "input/{name}/references.fasta",
-		outliers = "input/{name}/outliers.txt"
-	output:
-		filtered = "profile/analysis/{name}/filtered.fasta"
-	shell:
-		"seqkit grep -vf {input.outliers} {input.fasta} -o {output}"
+    input:
+        fasta = "input/{name}/references.fasta",
+        outliers = "input/{name}/outliers.txt"
+    output:
+        filtered = "analysis/profile/{name}/filtered.fasta"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "seqkit grep -vf {input.outliers} {input.fasta} -o {output}"
 
 rule cluster:
-	input:
-		"profile/analysis/{name}/filtered.fasta"
-	output:
-		"profile/analysis/{name}/filtered.cdhit"
-	shell:
-		"cdhit -i {input} -o {output} -d 0 -c 0.6 -n 2"
+    input:
+        "analysis/profile/{name}/filtered.fasta"
+    output:
+        "analysis/profile/{name}/filtered.cdhit"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "cdhit -i {input} -o {output} -d 0 -c 0.6 -n 2"
 
 rule align:
-	input:
-		"profile/analysis/{name}/filtered.cdhit"
-	output:
-		"profile/analysis/{name}/aligned.mafft"
-	threads:
-		workflow.cores
-	shell:
-		"mafft --thread {threads} --localpair --maxiterate 1000 --reorder {input} > {output}"
+    input:
+        "analysis/profile/{name}/filtered.cdhit"
+    output:
+        "analysis/profile/{name}/aligned.mafft"
+    threads:
+        workflow.cores
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "mafft --thread {threads} --localpair --maxiterate 1000 --reorder {input} > {output}"
 
 rule annotate_aln:
-	input:
-		"profile/analysis/{name}/aligned.mafft"
-	output:
-		"profile/analysis/{name}/aligned.a2m"
-	shell:
-		"hhconsensus -i {input} -o stdout -M 50 | addss.pl stdin stdout | reformat.pl a3m a2m /dev/stdin {output}"
+    input:
+        "analysis/profile/{name}/aligned.mafft"
+    output:
+        "analysis/profile/{name}/aligned.a2m"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hhconsensus -i {input} -o stdout -M 50 | addss.pl stdin stdout | reformat.pl a3m a2m /dev/stdin {output}"
 
 rule hmm_align:
-	input:
-		br = "input/BR.fas",
-		hmm = "profile/output/{name}.hmm"
-	output:
-		"profile/output/{name}_BR.a2m"
-	shell:
-		"hmmalign --outformat A2M -o {output} {input.hmm} {input.br}"
+    input:
+        fas = "positions/{ref}.fas",
+        hmm = "output/profile/{name}.hmm"
+    output:
+        "output/profile/{name}_{ref}.a2m"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hmmalign --outformat A2M -o {output} {input.hmm} {input.fas}"
 
 rule bfd_index:
-	input:
-		data  = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m.ffdata",
-		index = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m.ffindex"
-	output:
-		"refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m.ffindex.sorted"
-	shell:
-		"""
-		paste <(awk '{print$1}' RS=\\0 {input.data} | cut -c2-) <(cut -f2,3 {input.index} | sort -k1,1n) | sort -k2,2n > {output}
-		"""
+    input:
+        "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m.ffdata"
+    output:
+        "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m_names.ffindex"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "grep -Pab '\\x0' {input} | awk -F'[:\\0#\\t ]+' '{{n2=$1+1;print $2,0+n1,n2-n1;n1=n2}}' OFS='\\t' | LC_COLLATE=C sort -k1,1 > {output}"
+
+rule uniref90_hhsearch:
+    input:
+        fas = "refs/uniref90.fasta",
+        hmm = "output/profile/{name}.hmm"
+    output:
+        "analysis/uniref90/{name}/hmmsearch.txt"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hmmsearch -E 1 -o /dev/null --tblout {output} {input.hmm} {input.fas}"
+
+rule uniref90_faidx:
+    input:
+        "refs/uniref90.fasta"
+    output:
+        "refs/uniref90.fasta.seqkit.fai"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "seqkit faidx -f {input}"
+
+rule uniref90_extract:
+    input:
+        fasta = "refs/uniref90.fasta",
+        fai = "refs/uniref90.fasta.seqkit.fai",
+        tblout = "analysis/uniref90/{name}/hmmsearch.txt"
+    output:
+        "analysis/uniref90/{name}/hmmsearch.fasta"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "grep -v '^#' {input.tblout} | cut -f1 -d' ' | xargs seqkit faidx -f {input.fasta} > {output}"
 
 rule convert_aln:
-	input:
-		"profile/analysis/{name}/aligned.a2m"
-	output:
-		"profile/analysis/{name}/aligned.fas"
-	shell:
-		"seqkit fx2tab {input} | tail -n+4 | seqkit tab2fx | seqkit replace -sp \\\\. -r - -o {output}"
+    input:
+        "analysis/profile/{name}/aligned.a2m"
+    output:
+        "analysis/profile/{name}/aligned.fas"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "seqkit fx2tab {input} | tail -n+4 | seqkit tab2fx | seqkit replace -sp \\\\. -r - -o {output}"
 
 rule hhmake:
-	input:
-		"profile/analysis/{name}/trimmed.a2m"
-	output:
-		"profile/output/{name}.hhm"
-	shell:
-		"hhmake -seq 100000 -i {input} -o {output}"
-
-rule hhsearch:
-	input:
-		"profile/output/{name}.hhm"
-	output:
-		hhr = "hh/hhsearch/{name}/bfd.hhr",
-		a3m = "hh/hhsearch/{name}/bfd.a3m"
-	params:
-		d = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt"
-	shell:
-		"hhsearch -i {input} -d {params.d} -o {output.hhr} -oa3m {output.a3m}"
+    input:
+        "analysis/profile/{name}/trimmed.a2m"
+    output:
+        "output/profile/{name}.hhm"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hhmake -seq 100000 -i {input} -o {output}"
 
 rule hhblits:
-	input:
-		"profile/output/{name}.hhm"
-	output:
-		hhr = "hh/hhblits/{name}/bfd.hhr",
-		a3m = "hh/hhblits/{name}/bfd.a3m"
-	params:
-		d = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
-		maxsize = 10000
-	shell:
-		"hhblits -Z {params.maxsize} -B {params.maxsize} -maxseq {params.maxsize} -realign_max {params.maxsize} -i {input} -d {params.d} -o {output.hhr} -oa3m {output.a3m}"
+    input:
+        "output/profile/{name}.hhm"
+    output:
+        hhr = "hh/hhblits/{name}/bfd.hhr",
+        a3m = "hh/hhblits/{name}/bfd.a3m"
+    params:
+        d = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
+        maxsize = 1000000
+    conda:
+        "envs/tools.yaml"
+    threads:
+        workflow.cores
+    shell:
+        "hhblits -cpu {threads} -Z {params.maxsize} -B {params.maxsize} -maxseq {params.maxsize} -realign_max {params.maxsize} -i {input} -d {params.d} -o {output.hhr} -oa3m {output.a3m} -all"
+
+rule hhblits_filtered:
+    input:
+        "output/profile/{name}.hhm"
+    output:
+        a3m = "hh/hhblits/{name}/bfd_filtered.a3m"
+    params:
+        d = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
+        cov = 50,
+        maxsize = 10000
+    conda:
+        "envs/tools.yaml"
+    threads:
+        workflow.cores
+    shell:
+        "hhblits -cpu {threads} -Z {params.maxsize} -B {params.maxsize} -maxseq {params.maxsize} -realign_max {params.maxsize} -i {input} -d {params.d} -cov {params.cov} -o /dev/null -oa3m {output.a3m}"
+
+rule hhblits_a3m_to_sto:
+    input:
+        "hh/hhblits/{name}/bfd_filtered.a3m"
+    output:
+        "hh/hhblits/{name}/bfd_filtered.sto"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "reformat.pl a3m sto {input} {output}"
+
+rule hhblits_build_hmm:
+    input:
+        "hh/hhblits/{name}/bfd_filtered.sto"
+    output:
+        "hh/hhblits/{name}/bfd_filtered.hmm"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hmmbuild -n {wildcards.name} {output} {input}"
+
+rule hhblits_hhmake:
+    input:
+        "hh/hhblits/{name}/bfd_filtered.a3m"
+    output:
+        "hh/hhblits/{name}/bfd_filtered.hhm"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hhmake -seq 100000 -i {input} -o {output}"
+
+rule hhsearch:
+    input:
+        "hh/hhblits/{name}/bfd_filtered.hhm"
+    output:
+        hhr = "hh/hhsearch/{name}/bfd.hhr",
+        a3m = "hh/hhsearch/{name}/bfd.a3m"
+    params:
+        d = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
+        maxsize = 500
+    threads:
+        workflow.cores
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hhsearch -cpu {threads} -Z {params.maxsize} -B {params.maxsize} -maxseq {params.maxsize} -realign_max {params.maxsize} -i {input} -d {params.d} -o {output.hhr} -oa3m {output.a3m}"
+
+rule hh_extract_index:
+    input:
+        hhr = "hh/hhblits/{name}/bfd.hhr",
+        index = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m_names.ffindex"
+    output:
+        "hh/hhblits/{name}/bfd.index"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "grep '^>' {input.hhr} | sort -u | seqkit seq -ni | grep -Fwf- {input.index} > {output}"
 
 rule hh_extract:
-        input:
-                hhr = "hh/hhblits/{name}/bfd.hhr",
-                data  = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m.ffdata",
-                index = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m.ffindex.sorted"
-        output:
-                "hh/hhblits/{name}/bfd.fasta"
-        shell:
-                "grep '>' {input.hhr} | seqkit seq -ni | xargs ffindex_get {input.data} {input.index} | grep -v '^#' | seqkit seq -go {output}"
+    input:
+        data  = "refs/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt_a3m.ffdata",
+        index = "hh/hhblits/{name}/bfd.index"
+    output:
+        "hh/hhblits/{name}/bfd.fasta"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "wc -l < {input.index} | xargs seq | xargs ffindex_get {input.data} {input.index} -n | awk '/^#/{{c=$1}}/^>/{{NF=2;$2=c}}!/^#/' | seqkit grep -rvp _consensus$ | seqkit seq -go {output}"
 
 rule hh_blast:
-	input:
-		query = "hh/hhblits/{name}/bfd.fasta",
-		db = "refs/{list}.fasta"
-	output:
-		"hh/hhblits/{name}/bfd-{list}.blast"
-	params:
-		evalue = 1e-10
-	shell:
-		"blastp -db {input.db} -query {input.query} -evalue {params.evalue} -out {output} -outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle'"
+    input:
+        query = "hh/hhblits/{name}/bfd.fasta",
+        db = "refs/{list}.fasta"
+    output:
+        "hh/hhblits/{name}/bfd-{list}.blast"
+    params:
+        evalue = 1e-10
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "blastp -db {input.db} -query {input.query} -evalue {params.evalue} -out {output} -outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle'"
 
 rule hh_hhm:
-	input:
-		query = "hh/hhblits/{name}/bfd.fasta",
-		hmm = "profile/output/{name}.hmm"
-	output:
-		"hh/hhblits/{name}/bfd.tblout"
-	shell:
-		"hmmsearch --tblout {output} -o /dev/null {input.hmm} {input.query}"
+    input:
+        query = "hh/hhblits/{name}/bfd.fasta",
+        hmm = "output/profile/{name}.hmm"
+    output:
+        tblout = "hh/hhblits/{name}/bfd.hmmsearch.tblout",
+        domtblout = "hh/hhblits/{name}/bfd.hmmsearch.domtblout",
+        out = "hh/hhblits/{name}/bfd.hmmsearch.txt"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hmmsearch --max --tblout {output.tblout} --domtblout {output.domtblout} -o {output.out} {input.hmm} {input.query}"
+
+rule hhalign_BR:
+    input:
+        i = "positions/{ref}.fas",
+        t = "hh/hhblits/{name}/bfd.a3m"
+    output:
+        "hh/hhblits/{name}/{ref}.hhr"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hhalign -i {input.i} -t {input.t} -o {output}"
+
+rule extract_hhr_positions:
+    input:
+        a3m = "hh/hhblits/{name}/bfd.a3m",
+        ref_hhr = "hh/hhblits/{name}/{ref}.hhr"
+    output:
+        "hh/hhblits/{name}/bfd_{ref}.tsv"
+    params:
+        positions = positions
+    conda:
+        "envs/biopython.yaml"
+    script:
+        "scripts/extract_a3m.py"
 
 rule trim_aln:
-	input:
-		a2m = "profile/analysis/{name}/aligned.a2m"
-	output:
-		trimmed = "profile/analysis/{name}/trimmed.a2m"
-	script:
-		"scripts/trim.py"
+    input:
+        a2m = "analysis/profile/{name}/aligned.a2m"
+    output:
+        trimmed = "analysis/profile/{name}/trimmed.a2m"
+    conda:
+        "envs/biopython.yaml"
+    script:
+        "scripts/trim.py"
 
 rule build_hmm:
-	input:
-		"profile/analysis/{name}/trimmed.a2m"
-	output:
-		protected("profile/output/{name}.hmm")
-	shell:
-		"hmmbuild -n {config[name]} {output} {input}"
+    input:
+        "analysis/profile/{name}/trimmed.a2m"
+    output:
+        protected("output/profile/{name}.hmm")
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hmmbuild -n {wildcards.name} {output} {input}"
 
 rule hmmsearch:
-	input:
-		fasta = config["sequences"],
-		hmm = "profile/output/{name}.hmm"
-	output:
-		matches = expand("{fasta}_{{name}}.txt", fasta = config["sequences"])
-	params:
-		do_max = "" if "no_max" in config else "--max"
-	shell:
-		"hmmsearch -o {output} {params.do_max} {input.hmm} {input.fasta}"
+    input:
+        fasta = "queries/{query}.fasta",
+        hmm = "output/profile/{name}.hmm"
+    output:
+        matches = "analysis/domain/{query}_{name}.txt"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hmmsearch -o {output} --max {input.hmm} {input.fasta}"
 
 rule xlsx_to_fasta:
-	input:
-		"database/sequences.xlsx"
-	output:
-		"database/sequences.fasta"
-	script:
-		"scripts/xlsx2fasta.R"
+    input:
+        "queries/{query}.xlsx"
+    output:
+        "queries/{query}.fasta"
+    conda:
+        "envs/r.yaml"
+    script:
+        "scripts/xlsx2fasta.R"
 
 rule extract_domains:
-	input:
-		fasta = config["sequences"],
-		a2m = "profile/output/{name}_BR.a2m",
-		matches = expand("{fasta}_{{name}}.txt", fasta = config["sequences"]),
-		hmm = "profile/output/{name}.hmm"
-	output:
-		tsv = expand("{fasta}_{{name}}.tsv", fasta = config["sequences"]),
-		faa = expand("{fasta}_{{name}}.faa", fasta = config["sequences"])
-	params:
-		positions = config["positions"]
-	script:
-		"scripts/extract.py"
+    input:
+        fasta = "queries/{query}.fasta",
+        a2m = expand("output/profile/{{name}}_{ref}.a2m", ref = ref),
+        matches = "analysis/domain/{query}_{name}.txt",
+        hmm = "output/profile/{name}.hmm"
+    output:
+        "analysis/domain/{query}_{name}.tsv",
+    params:
+        config = lambda w: config[w.name],
+        positions = positions
+    conda:
+        "envs/biopython.yaml"
+    script:
+        "scripts/extract_hmmsearch.py"
 
