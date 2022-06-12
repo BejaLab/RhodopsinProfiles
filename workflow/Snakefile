@@ -9,13 +9,11 @@ rhod_lists , = glob_wildcards("refs/{list}.fasta.pdb")
 ref = 'BR'
 
 names ,= glob_wildcards("input/{name}/references.fasta")
-#queries ,= glob_wildcards("queries/{query}.fasta")
+queries ,= glob_wildcards("queries/{query}.fasta")
 #queries_xlsx ,= glob_wildcards("queries/{query}.xlsx")
 #for query in queries_xlsx:
 #    if query not in queries:
 #        queries.append(query)
-
-queries = "sequences"
 
 config = {}
 
