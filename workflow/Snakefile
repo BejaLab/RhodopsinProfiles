@@ -9,11 +9,13 @@ rhod_lists , = glob_wildcards("refs/{list}.fasta.pdb")
 ref = 'BR'
 
 names ,= glob_wildcards("input/{name}/references.fasta")
-queries ,= glob_wildcards("queries/{query}.fasta")
-queries_xlsx ,= glob_wildcards("queries/{query}.xlsx")
-for query in queries_xlsx:
-    if query not in queries:
-        queries.append(query)
+#queries ,= glob_wildcards("queries/{query}.fasta")
+#queries_xlsx ,= glob_wildcards("queries/{query}.xlsx")
+#for query in queries_xlsx:
+#    if query not in queries:
+#        queries.append(query)
+
+queries = "sequences"
 
 config = {}
 
@@ -50,9 +52,9 @@ rule profile:
         expand("output/profile/{name}.hmm", name = names),
         expand("output/profile/{name}_{ref}.a2m", name = names, ref = ref)
 
-rule uniref:
+rule domain:
     input:
-        expand("analysis/uniref90/{name}/hmmsearch.fasta", name = names)
+        expand("output/domains/{query}_domains.tsv", query = queries)
 
 rule hh:
     input:
@@ -62,13 +64,13 @@ rule hh:
         expand("hh/hhblits/{name}/bfd_{ref}.tsv", name = names, ref = ref)
         # blast = expand("hh/hhblits/{name}/bfd-{list}.blast", name = names, list = rhod_lists)
 
-rule domain:
+rule hh_uniref:
     input:
-        expand("output/domains/{query}_domains.tsv", query = queries)
+        "output/hh_uniref_similar.tsv"
 
 rule collect_domains:
     input:
-        expand("analysis/domain/{{query}}_{name}.tsv", name = names)
+        expand("analysis/domains/{{query}}_{name}.tsv", name = names)
     output:
         "output/domains/{query}_domains.tsv"
     params:
@@ -139,39 +141,6 @@ rule bfd_index:
         "envs/tools.yaml"
     shell:
         "grep -Pab '\\x0' {input} | awk -F'[:\\0#\\t ]+' '{{n2=$1+1;print $2,0+n1,n2-n1;n1=n2}}' OFS='\\t' | LC_COLLATE=C sort -k1,1 > {output}"
-
-rule uniref90_hhsearch:
-    input:
-        fas = "refs/uniref90.fasta",
-        hmm = "output/profile/{name}.hmm"
-    output:
-        "analysis/uniref90/{name}/hmmsearch.txt"
-    conda:
-        "envs/tools.yaml"
-    shell:
-        "hmmsearch -E 1 -o /dev/null --tblout {output} {input.hmm} {input.fas}"
-
-rule uniref90_faidx:
-    input:
-        "refs/uniref90.fasta"
-    output:
-        "refs/uniref90.fasta.seqkit.fai"
-    conda:
-        "envs/tools.yaml"
-    shell:
-        "seqkit faidx -f {input}"
-
-rule uniref90_extract:
-    input:
-        fasta = "refs/uniref90.fasta",
-        fai = "refs/uniref90.fasta.seqkit.fai",
-        tblout = "analysis/uniref90/{name}/hmmsearch.txt"
-    output:
-        "analysis/uniref90/{name}/hmmsearch.fasta"
-    conda:
-        "envs/tools.yaml"
-    shell:
-        "grep -v '^#' {input.tblout} | cut -f1 -d' ' | xargs seqkit faidx -f {input.fasta} > {output}"
 
 rule convert_aln:
     input:
@@ -368,30 +337,30 @@ rule hmmsearch:
         fasta = "queries/{query}.fasta",
         hmm = "output/profile/{name}.hmm"
     output:
-        matches = "analysis/domain/{query}_{name}.txt"
+        matches = "analysis/domains/{query}_{name}.txt"
     conda:
         "envs/tools.yaml"
     shell:
         "hmmsearch -o {output} --max {input.hmm} {input.fasta}"
 
-rule xlsx_to_fasta:
-    input:
-        "queries/{query}.xlsx"
-    output:
-        "queries/{query}.fasta"
-    conda:
-        "envs/r.yaml"
-    script:
-        "scripts/xlsx2fasta.R"
+#rule xlsx_to_fasta:
+#    input:
+#        "queries/{query}.xlsx"
+#    output:
+#        "queries/{query}.fasta"
+#    conda:
+#        "envs/r.yaml"
+#    script:
+#        "scripts/xlsx2fasta.R"
 
 rule extract_domains:
     input:
         fasta = "queries/{query}.fasta",
         a2m = expand("output/profile/{{name}}_{ref}.a2m", ref = ref),
-        matches = "analysis/domain/{query}_{name}.txt",
+        matches = "analysis/domains/{query}_{name}.txt",
         hmm = "output/profile/{name}.hmm"
     output:
-        "analysis/domain/{query}_{name}.tsv",
+        "analysis/domains/{query}_{name}.tsv",
     params:
         config = lambda w: config[w.name],
         positions = positions
@@ -400,3 +369,124 @@ rule extract_domains:
     script:
         "scripts/extract_hmmsearch.py"
 
+rule cdhit:
+    input:
+        "output/domains/{query}_domains.fasta"
+    output:
+        cdhit = "output/domains/{query}_domains_{c}.cdhit",
+        clstr = "output/domains/{query}_domains_{c}.cdhit.clstr"
+    params:
+        n = lambda w: 2 if float(w.c) <= 0.6 else 5
+    threads:
+        10
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "cdhit -i {input} -o {output.cdhit} -c {wildcards.c} -d 0 -n {params.n} -T {threads}"
+
+rule tsv_to_fasta:
+    input:
+        "output/domains/{query}_domains.tsv"
+    output:
+        "output/domains/{query}_domains.fasta"
+    params:
+        min_len = 180
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "csvtool -t TAB -u TAB namedcols record_id,domain_seq,positions_res {input} | awk 'NR>1&&$3!~/-/&&$3~/K$/' | cut -f1,2 | seqkit tab2fx | seqkit seq -gm{params.min_len} -o {output}"
+
+rule cat:
+    input:
+        "queries/sequences.fasta",
+        expand("analysis/uniref100/{profile}/hmmsearch.fasta", profile = names),
+        expand("hh/hhblits/{profile}/bfd.fasta", profile = names)
+    output:
+        "queries/database.fasta"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "seqkit rmdup -o {output} {input}"
+
+# Not under conda
+rule usearch_global:
+    input:
+        query = "output/domains/sequences_domains.fasta",
+        target = "output/domains/database_domains.fasta"
+    output:
+        "analysis/global/usearch_global.tsv"
+    params:
+        id = 0.5,
+        query_cov = 0.95
+    threads:
+        10
+    shell:
+        "usearch -threads {threads} -usearch_global {input.query} -db {input.target} -id {params.id} -userout {output} -userfields query+target+id -query_cov {params.query_cov} -target_cov 0 -maxaccepts 1000000"
+
+rule usearch_extract:
+    input:
+        tsv = "analysis/global/usearch_global.tsv",
+        fasta = "queries/database.fasta",
+        fai = "queries/database.fasta.seqkit.fai"
+    output:
+        "analysis/global/usearch_global.fasta"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "cut -f2 {input.tsv} | cut -f1 -d' ' | sort -u | xargs seqkit faidx -f {input.fasta} > {output}"
+
+rule uniref_hmmsearch:
+    input:
+        fas = "refs/uniref100.fasta",
+        hmm = "output/profile/{name}.hmm"
+    output:
+        "analysis/uniref100/{name}/hmmsearch.txt"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "hmmsearch -E 1 -o /dev/null --tblout {output} {input.hmm} {input.fas}"
+
+rule faidx:
+    input:
+        "{prefix}.fasta"
+    output:
+        "{prefix}.fasta.seqkit.fai"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "seqkit faidx -f {input}"
+
+rule uniref_matches:
+    input:
+        "analysis/uniref100/{name}/hmmsearch.txt"
+    output:
+        "analysis/uniref100/{name}/hmmsearch.list"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "grep -v '^#' {input} | cut -f1 -d' ' > {output}"
+
+rule uniref_extract:
+    input:
+        fasta = "refs/uniref100.fasta",
+        list  = "analysis/uniref100/{name}/hmmsearch.list"
+    output:
+        "analysis/uniref100/{name}/hmmsearch.fasta"
+    conda:
+        "envs/tools.yaml"
+    shell:
+        "seqkit grep -f {input.list} -o {output} {input.fasta}"
+
+rule hh_uniref_collect:
+    input:
+        usearch = "analysis/global/usearch_global.tsv",
+        clstr   = "output/domains/database_domains_0.5.cdhit.clstr",
+        fasta   = "queries/database.fasta",
+        cdhit   = "output/domains/database_domains_1.cdhit"
+    output:
+        similar = "output/hh_uniref_similar.tsv",
+        different = "output/hh_uniref_different.tsv"
+    conda:
+        "envs/r.yaml"
+    script:
+        "scripts/global.R"

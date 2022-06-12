@@ -12,14 +12,19 @@ for tsv_file in tsv_files:
         reader = csv.reader(fd, delimiter = "\t")
         header = next(reader)
         for row in reader:
-            record = zip(headers, row)
+            record = dict(zip(header, row))
             record_id = record['record_id']
-            evalue = record['full_E_value']
-            if record_id not in best_records or best_records[record_id]['full_E_value'] > full_E_value:
+            if record['profile'] == '':
+                record['full_E_value'] = 10
+            else:
+                record['full_E_value'] = float(record['full_E_value'])
+            if record_id not in best_records or best_records[record_id]['full_E_value'] > record['full_E_value']:
                 best_records[record_id] = record
+                    
 assert len(header) > 0, "No records found"
 with open(out_file, 'w') as fd:
     tsv = csv.writer(fd, delimiter = "\t")
     tsv.writerow(header)
     for record in best_records.values():
-        tsv.writerow(record.values())
+        if record['full_E_value'] < 10:
+            tsv.writerow(record.values())

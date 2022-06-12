@@ -167,64 +167,63 @@ with open(dom_file) as dom:
 # Parse the fasta file and extract the domains
 with open(fas_file) as fas_fh:
     with open(tsv_file, 'w') as tsv_fh:
-        with open(faa_file, 'w') as faa_fh:
-            tsv = csv.writer(tsv_fh, delimiter = "\t")
-            tsv.writerow([ 'record_id', 'profile', 'ali_from', 'ali_left', 'hmm_from', 'hmm_left', 'full_E_value', 'full_score', 'positions', 'positions_trim', 'positions_res', 'domain_seq' ])
-            fas = SeqIO.parse(fas_fh, 'fasta')
-            for record in fas:
-                if record.id in data:
-                    ali_from = hmm_from = env_from = len(record.seq)
-                    ali_to = hmm_to = env_to = 0
-                    ali_positions      =   [0] * len(positions)
-                    ali_positions_trim =   [0] * len(positions)
-                    ali_positions_res  = ['-'] * len(positions)
-                    for domain in data[record.id]['domains']:
-                        if domain['c_Evalue'] <= c_Evalue_threshold:
-                            if domain['ali_from'] < ali_from:
-                                ali_from = domain['ali_from']
-                                hmm_from = domain['hmm_from']
-                                env_from = domain['env_from']
-                            if domain["ali_to"] > ali_to:
-                                ali_to = domain['ali_to']
-                                hmm_to = domain['hmm_to']
-                                env_to = domain['env_to']
-                                hmm_seq = domain['hmm_seq']
-                                ali_seq = domain['ali_seq']
-                                hmm_pos = domain['hmm_from']
-                                ali_pos = domain['ali_from']
-                                for i in range(len(hmm_seq)):
-                                    hmm_res = hmm_seq[i]
-                                    ali_res = ali_seq[i]
-                                    if hmm_pos in hmm_positions and hmm_res != '.':
-                                        pos_index = hmm_positions.index(hmm_pos)
-                                        ali_positions[pos_index] = ali_pos
-                                        ali_positions_res[pos_index] = ali_res
-                                    hmm_pos += hmm_res != '.'
-                                    ali_pos += ali_res != '-'
+        tsv = csv.writer(tsv_fh, delimiter = "\t")
+        tsv.writerow([ 'record_id', 'profile', 'ali_from', 'ali_left', 'hmm_from', 'hmm_left', 'full_E_value', 'full_score', 'positions', 'positions_trim', 'positions_res', 'domain_seq' ])
+        fas = SeqIO.parse(fas_fh, 'fasta')
+        for record in fas:
+            if record.id in data:
+                ali_from = hmm_from = env_from = len(record.seq)
+                ali_to = hmm_to = env_to = 0
+                ali_positions      =   [0] * len(positions)
+                ali_positions_trim =   [0] * len(positions)
+                ali_positions_res  = ['-'] * len(positions)
+                for domain in data[record.id]['domains']:
+                    if domain['c_Evalue'] <= c_Evalue_threshold:
+                        if domain['ali_from'] < ali_from:
+                            ali_from = domain['ali_from']
+                            hmm_from = domain['hmm_from']
+                            env_from = domain['env_from']
+                        if domain["ali_to"] > ali_to:
+                            ali_to = domain['ali_to']
+                            hmm_to = domain['hmm_to']
+                            env_to = domain['env_to']
+                            hmm_seq = domain['hmm_seq']
+                            ali_seq = domain['ali_seq']
+                            hmm_pos = domain['hmm_from']
+                            ali_pos = domain['ali_from']
+                            for i in range(len(hmm_seq)):
+                                hmm_res = hmm_seq[i]
+                                ali_res = ali_seq[i]
+                                if hmm_pos in hmm_positions and hmm_res != '.':
+                                    pos_index = hmm_positions.index(hmm_pos)
+                                    ali_positions[pos_index] = ali_pos
+                                    ali_positions_res[pos_index] = ali_res
+                                hmm_pos += hmm_res != '.'
+                                ali_pos += ali_res != '-'
 
-                    ali_left = len(record.seq) - ali_to
-                    hmm_left = hmm_len - hmm_to
+                ali_left = len(record.seq) - ali_to
+                hmm_left = hmm_len - hmm_to
 
-                    offset_from = offset_n
+                offset_from = offset_n
 
-                    if hmm_from > extra_threshold:
-                        offset_from += extra_offset
+                if hmm_from > extra_threshold:
+                    offset_from += extra_offset
 
-                    offset_to = offset_c
-                    if hmm_left > extra_threshold:
-                        offset_to += extra_offset
+                offset_to = offset_c
+                if hmm_left > extra_threshold:
+                    offset_to += extra_offset
 
-                    trim_from = max(ali_from - offset_from - hmm_from, 0)
-                    for i in range(len(positions)):
-                        ali_positions_trim[i] = ali_positions[i] - trim_from if ali_positions[i] > 0 else 0
+                trim_from = max(ali_from - offset_from - hmm_from, 0)
+                for i in range(len(positions)):
+                    ali_positions_trim[i] = ali_positions[i] - trim_from if ali_positions[i] > 0 else 0
 
-                    trim_to   = ali_to + offset_to + hmm_left
+                trim_to   = ali_to + offset_to + hmm_left
 
-                    record.seq = record.seq[trim_from:ali_from - 1].lower() + record.seq[ali_from - 1:ali_to] + record.seq[ali_to:trim_to].lower()
-                    ali_positions_str      = ','.join(map(str, ali_positions))
-                    ali_positions_trim_str = ','.join(map(str, ali_positions_trim))
-                    ali_positions_res_str  = ','.join(ali_positions_res)
-                    tsv.writerow([ record.id, name, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_positions_str, ali_positions_trim_str, ali_positions_res_str, record.seq ])
-                elif not hits_only:
-                    tsv.writerow([ record.id, '', '', '', '', '', '', '', '', '', '', '' ])
-                    stderr.write("%s: domains not found\n" % record.id)
+                record.seq = record.seq[trim_from:ali_from - 1].lower() + record.seq[ali_from - 1:ali_to] + record.seq[ali_to:trim_to].lower()
+                ali_positions_str      = ','.join(map(str, ali_positions))
+                ali_positions_trim_str = ','.join(map(str, ali_positions_trim))
+                ali_positions_res_str  = ','.join(ali_positions_res)
+                tsv.writerow([ record.id, name, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_positions_str, ali_positions_trim_str, ali_positions_res_str, record.seq ])
+            elif not hits_only:
+                tsv.writerow([ record.id, '', '', '', '', '', '', '', '', '', '', '' ])
+                stderr.write("%s: domains not found\n" % record.id)

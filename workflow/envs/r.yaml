@@ -4,4 +4,5 @@ dependencies:
  - r=4.1
  - r-dplyr=1.0.9
  - r-tidyr=1.2.0
+ - r-seqinr=4.2_16
  - r-readxl=1.4.0
