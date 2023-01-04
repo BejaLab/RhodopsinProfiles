@@ -21,6 +21,7 @@ with open(a2m_file) as fh:
 
 assert num_pos > 0, "Alignment is empty"
 
+num_records = len(records)
 start = stop = None
 for i in range(num_pos):
     gap_score = gap_nums[i] / num_records
