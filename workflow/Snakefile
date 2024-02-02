@@ -94,7 +94,7 @@ rule cluster:
     conda:
         "envs/tools.yaml"
     shell:
-        "cdhit -i {input} -o {output} -d 0 -c 0.6 -n 2"
+        "cd-hit -i {input} -o {output} -d 0 -c 0.6 -n 2"
 
 rule align:
     input:
@@ -114,9 +114,12 @@ rule annotate_aln:
     output:
         "analysis/profile/{name}/aligned.a2m"
     conda:
-        "envs/tools.yaml"
+        "envs/hhsuite.yaml"
     shell:
-        "reformat.pl fas a3m {input} - -v 0 -M 50 | hhconsensus -i stdin -o stdout | sed 's/>.*_consensus/>{name}_consensus/' | addss.pl stdin stdout | reformat.pl a3m a2m - {output}"
+        """
+        export PATH=$CONDA_PREFIX/scripts:$PATH
+        reformat.pl fas a3m {input} - -v 0 -M 50 | hhconsensus -i stdin -o stdout | sed 's/>.*_consensus/>{name}_consensus/' | addss.pl stdin stdout | reformat.pl a3m a2m - {output}
+        """
 
 rule hmm_align:
     input:
@@ -170,7 +173,7 @@ rule hhmake:
     output:
         "output/profile/{name}.hhm"
     conda:
-        "envs/tools.yaml"
+        "envs/hhsuite.yaml"
     shell:
         "hhmake -seq 100000 -i {input} -o {output}"
 
@@ -185,7 +188,7 @@ rule hhblits:
         d = "databases/{db}",
         maxsize = 1000000
     conda:
-        "envs/tools.yaml"
+        "envs/hhsuite.yaml"
     threads:
         20
     shell:
@@ -315,7 +318,7 @@ rule hh_blast:
     params:
         evalue = 1e-10
     conda:
-        "envs/tools.yaml"
+        "envs/blast.yaml"
     shell:
         "blastp -db {input.db} -query {input.query} -evalue {params.evalue} -out {output} -outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle'"
 
@@ -339,7 +342,7 @@ rule hhalign_BR:
     output:
         "analysis/hhblits/{name}/{ref}.hhr"
     conda:
-        "envs/tools.yaml"
+        "envs/hhsuite.yaml"
     shell:
         "hhalign -i {input.i} -t {input.t} -o {output}"
 
@@ -426,7 +429,7 @@ rule cdhit:
     conda:
         "envs/tools.yaml"
     shell:
-        "cdhit -i {input} -o {output.cdhit} -c {wildcards.c} -d 0 -n {params.n} -T {threads}"
+        "cd-hit -i {input} -o {output.cdhit} -c {wildcards.c} -d 0 -n {params.n} -T {threads}"
 
 rule tsv_to_fasta:
     input:
