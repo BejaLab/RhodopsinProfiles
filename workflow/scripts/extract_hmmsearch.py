@@ -16,6 +16,7 @@ offset_n        = config['offset_n']
 offset_c        = config['offset_c']
 extra_threshold = config['extra_threshold']
 extra_offset    = config['extra_offset']
+overlap         = config['overlap']
 c_Evalue_threshold = config['c_Evalue_threshold']
 hits_only = config['hits_only'] if 'hits_only' in config else False
 
@@ -172,28 +173,62 @@ with open(fas_file) as fas_fh:
         fas = SeqIO.parse(fas_fh, 'fasta')
         for record in fas:
             if record.id in data:
-                ali_from = hmm_from = env_from = len(record.seq)
-                ali_to = hmm_to = env_to = 0
-                ali_positions      =   [0] * len(positions)
-                ali_positions_trim =   [0] * len(positions)
-                ali_positions_res  = ['-'] * len(positions)
+                blocks = []
                 for domain in data[record.id]['domains']:
                     if domain['c_Evalue'] <= c_Evalue_threshold:
-                        if domain['ali_from'] < ali_from:
-                            ali_from = domain['ali_from']
-                            hmm_from = domain['hmm_from']
-                            env_from = domain['env_from']
-                        if domain["ali_to"] > ali_to:
-                            ali_to = domain['ali_to']
-                            hmm_to = domain['hmm_to']
-                            env_to = domain['env_to']
-                            hmm_seq = domain['hmm_seq']
-                            ali_seq = domain['ali_seq']
-                            hmm_pos = domain['hmm_from']
-                            ali_pos = domain['ali_from']
-                            for i in range(len(hmm_seq)):
-                                hmm_res = hmm_seq[i]
-                                ali_res = ali_seq[i]
+                        blocks.append(( domain['hmm_from'], domain['hmm_to'], domain['ali_from'], domain['ali_to'], domain['hmm_seq'], domain['ali_seq'] ))
+
+                blocks.sort(key = lambda x: x[0])
+                groups = []
+                for i in range(len(blocks)):
+                    hmm1_from, hmm1_to, ali1_from, ali1_to, *rest = blocks[i]
+                    connected = False
+                    for group in groups:
+                        if i in group:
+                            connected = True
+                    if not connected:
+                        for j in range(i + 1, len(blocks)):
+                            hmm2_from, hmm2_to, ali2_from, ali2_to, *rest = blocks[j]
+                            if hmm1_to - hmm2_from < overlap and ali1_to - ali2_from < overlap:
+                                chained = False
+                                for group in groups:
+                                    if i in group or j in group:
+                                        group.add(i)
+                                        group.add(j)
+                                        chained = True
+                                if not chained:
+                                    groups.append({i, j})
+                                connected = True
+                        if not connected:
+                            groups.append({i})
+
+                ranges = []
+                for group in groups:
+                    hmm_from = min([ blocks[i][0] for i in group ])
+                    hmm_to   = max([ blocks[i][1] for i in group ])
+                    ali_from = min([ blocks[i][2] for i in group ])
+                    ali_to   = max([ blocks[i][3] for i in group ])
+                    hmm_seqs = [ blocks[i][4] for i in group ]
+                    ali_seqs = [ blocks[i][5] for i in group ]
+                    ranges.append((hmm_from, hmm_to, ali_from, ali_to, hmm_seqs, ali_seqs ))
+
+                ranges.sort(key = lambda x: x[2] - x[3])
+                ranges_done = []
+                for hmm_from, hmm_to, ali_from, ali_to, hmm_seqs, ali_seqs in ranges:
+                    nested = False
+                    for hmm0_from, hmm0_to, ali0_from, ali0_to in ranges_done:
+                        if hmm0_from <= hmm_from <= hmm0_to and hmm0_from <= hmm_to <= hmm0_to:
+                            nested = True
+                    if not nested:
+                        ali_positions      =   [0] * len(positions)
+                        ali_positions_trim =   [0] * len(positions)
+                        ali_positions_res  = ['-'] * len(positions)
+                        for i in range(len(hmm_seqs)):
+                            ali_pos = ali_from
+                            hmm_pos = hmm_from
+                            for j in range(len(hmm_seqs[i])):
+                                hmm_res = hmm_seqs[i][j]
+                                ali_res = ali_seqs[i][j]
                                 if hmm_pos in hmm_positions and hmm_res != '.':
                                     pos_index = hmm_positions.index(hmm_pos)
                                     ali_positions[pos_index] = ali_pos
@@ -201,29 +236,30 @@ with open(fas_file) as fas_fh:
                                 hmm_pos += hmm_res != '.'
                                 ali_pos += ali_res != '-'
 
-                ali_left = len(record.seq) - ali_to
-                hmm_left = hmm_len - hmm_to
+                        ali_left = len(record.seq) - ali_to
+                        hmm_left = hmm_len - hmm_to
 
-                offset_from = offset_n
+                        offset_from = offset_n
 
-                if hmm_from > extra_threshold:
-                    offset_from += extra_offset
+                        if hmm_from > extra_threshold:
+                            offset_from += extra_offset
 
-                offset_to = offset_c
-                if hmm_left > extra_threshold:
-                    offset_to += extra_offset
+                        offset_to = offset_c
+                        if hmm_left > extra_threshold:
+                            offset_to += extra_offset
 
-                trim_from = max(ali_from - offset_from - hmm_from, 0)
-                for i in range(len(positions)):
-                    ali_positions_trim[i] = ali_positions[i] - trim_from if ali_positions[i] > 0 else 0
+                        trim_from = max(ali_from - offset_from - hmm_from, 0)
+                        for i in range(len(positions)):
+                            ali_positions_trim[i] = ali_positions[i] - trim_from if ali_positions[i] > 0 else 0
 
-                trim_to   = ali_to + offset_to + hmm_left
+                        trim_to   = ali_to + offset_to + hmm_left
 
-                record.seq = record.seq[trim_from:ali_from - 1].lower() + record.seq[ali_from - 1:ali_to] + record.seq[ali_to:trim_to].lower()
-                ali_positions_str      = ','.join(map(str, ali_positions))
-                ali_positions_trim_str = ','.join(map(str, ali_positions_trim))
-                ali_positions_res_str  = ','.join(ali_positions_res)
-                tsv.writerow([ record.id, name, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_positions_str, ali_positions_trim_str, ali_positions_res_str, record.seq ])
+                        new_seq = record.seq[trim_from:ali_from - 1].lower() + record.seq[ali_from - 1:ali_to] + record.seq[ali_to:trim_to].lower()
+                        ali_positions_str      = ','.join(map(str, ali_positions))
+                        ali_positions_trim_str = ','.join(map(str, ali_positions_trim))
+                        ali_positions_res_str  = ','.join(ali_positions_res)
+                        tsv.writerow([ record.id, name, str(ali_from), str(ali_left), str(hmm_from), str(hmm_left), data[record.id]['full_E_value'], data[record.id]['full_score'], ali_positions_str, ali_positions_trim_str, ali_positions_res_str, new_seq ])
+
             elif not hits_only:
                 tsv.writerow([ record.id, '', '', '', '', '', '', '', '', '', '', '' ])
                 stderr.write("%s: domains not found\n" % record.id)
