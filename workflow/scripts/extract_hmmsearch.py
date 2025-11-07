@@ -124,9 +124,14 @@ def parse_aln_block(fh):
 
     line = next(fh)
     fields = re.split(" +", line.strip())
-    vals['ali_left']  = int(fields[-3])
+    # Sequence line can have '-' for positions when alignment is all gaps (no sequence aligned)
+    # Gap-only sequences are handled correctly downstream (gaps are skipped in position tracking)
+    # Use ali_left/ali_right = None to indicate missing/invalid values
+    ali_left_str = fields[-3]
+    ali_right_str = fields[-1]
+    vals['ali_left']  = int(ali_left_str) if ali_left_str != '-' else None
     vals['ali_seq']   = fields[-2]
-    vals['ali_right'] = int(fields[-1])
+    vals['ali_right'] = int(ali_right_str) if ali_right_str != '-' else None
     
     line = next(fh)
     fields = re.split(' +', line.strip(), 2)
